@@ -14,9 +14,11 @@ namespace LostEnemyFix.Patches
 
         public static bool SetAgentDestination(EnemyAI enemy)
         {
-            bool value = enemy.agent.SetDestination(enemy.destination);
-
-            if (!value)
+            if (enemy.agent.isOnNavMesh || enemy.agent.isOnOffMeshLink)
+            {
+                return enemy.agent.SetDestination(enemy.destination);
+            }
+            else
             {
                 bool kill = false;
                 switch (LostEnemyFix.killLostEnemiesMode.Value)
@@ -25,7 +27,7 @@ namespace LostEnemyFix.Patches
                         if (EnemyErrors.ContainsKey(enemy))
                         {
                             EnemyErrors[enemy]++;
-                            if (EnemyErrors[enemy] > 16)
+                            if (EnemyErrors[enemy] > 8)
                             {
                                 kill = true;
                             }
@@ -42,16 +44,24 @@ namespace LostEnemyFix.Patches
                         break;
                 }
 
-                LostEnemyFix.Instance.mls.LogWarning($"{(enemy.enemyType == null ? enemy.name : enemy.enemyType.enemyName)} Failed to locate NavMesh. {(kill ? "Killing enemy to prevent further errors.\n" : "\n")}" +
-                    $"Enemy Position: {enemy.transform.position} Target Destination: {enemy.destination} IsOutside: {enemy.isOutside} State: {enemy.currentBehaviourState.name}");
+                string enemyName = (enemy.enemyType == null ? enemy.name : enemy.enemyType.enemyName);
+                LostEnemyFix.Instance.mls.LogWarning($"{enemyName} Failed to locate NavMesh.\nEnemy Position: {enemy.transform.position} Target Destination: {enemy.destination} IsOutside: {enemy.isOutside} State: {enemy.currentBehaviourState.name}");
 
-                if (kill)
+                if (kill && enemy.IsOwner)
                 {
-                    enemy.KillEnemyServerRpc(true);
+                    if (LostEnemyFix.attemptRelocation.Value && NavMesh.SamplePosition(enemy.transform.position, out NavMeshHit hit, 50, enemy.agent.areaMask))
+                    {
+                        LostEnemyFix.Instance.mls.LogInfo($"Relocating {enemyName} to {hit.position} to prevent further errors.");
+                        enemy.agent.Warp(hit.position);
+                    }
+                    else
+                    {
+                        LostEnemyFix.Instance.mls.LogInfo($"Killing {enemyName} to prevent further errors.");
+                        enemy.KillEnemyServerRpc(true);
+                    }
                 }
             }
-
-            return value;
+            return false;
         }
 
         [HarmonyPatch("DoAIInterval")]
